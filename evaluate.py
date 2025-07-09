@@ -41,7 +41,7 @@ parser.add_argument('--maxlen', default=128, type=int)
 parser.add_argument('--hidden_units', default=256, type=int)    # 32, 64, 128, 256
 parser.add_argument('--num_blocks', default=2, type=int)    # 2, 4, 6
 parser.add_argument('--num_epochs', default=200, type=int)
-parser.add_argument('--num_heads', default=16, type=int)    # 1, 2, 4
+parser.add_argument('--num_heads', default=2, type=int)    # 1, 2, 4
 parser.add_argument('--dropout_rate', default=0.5, type=float)
 parser.add_argument('--l2_emb', default=0.01, type=float)
 parser.add_argument('--device', default='cuda:7', type=str)
@@ -57,8 +57,8 @@ parser.add_argument('--lamada', default=0.2, type=float)
 
 
 # Teacher Model GNNs
-parser.add_argument("--pre_train_path",default='/data/ZhaoShuyuan/Zhaoshuyuan/ELEME/Our_model_final/STKD/pre_train/', type=str)
-parser.add_argument("--gnn_dataset", default='/data/ZhaoShuyuan/Zhaoshuyuan/ELEME/Our_model_final/STKD/datasets/', type=str)
+parser.add_argument("--pre_train_path",default='./pre_train/', type=str)
+parser.add_argument("--gnn_dataset", default='./datasets/', type=str)
 parser.add_argument('--gnn_hidden_units', default=256, type=int)    # 32, 64, 128, 256
 parser.add_argument("--use_renorm", type=bool, default=True, help="use re-normalize when build witg")
 parser.add_argument("--use_scale", type=bool, default=False, help="use scale when build witg")
@@ -79,9 +79,6 @@ parser.add_argument("--adam_beta1", type=float, default=0.9, help="adam first be
 parser.add_argument("--adam_beta2", type=float, default=0.999, help="adam second beta value")
 
 # Test
-# parser.add_argument('--seed', default=3407, type=str)
-# parser.add_argument('--seed', default=42, type=str) 
-# parser.add_argument('--seed', default=114514, type=str) 
 parser.add_argument('--seed', default=24, type=str) 
 
 parser.add_argument('--fus', default='add', choices=['kd', 'add', 'cat', 'plus', 'None'], type=str) 
@@ -212,27 +209,11 @@ if __name__ == '__main__':
     temp = 7    # 1， 3， 5， 7， 9
 
     if args.city == 'taiyuan':
-        if args.fus == 'cat':
-            save_path = 'elm_taiyuan_default/elm__date=2024-12-02_04-10-30.epoch=200.lr=0.001.layer=2.head=16.hidden=256.maxlen=128.pth'
-        elif args.fus == 'add':
-            save_path = 'cat_wuhan'
-        else:
-            save_path = 'elm_taiyuan_default/elm__date=2024-12-02_12-30-26.epoch=200.lr=0.001.layer=2.head=16.hidden=256.maxlen=128.pth'
-
+        save_path = 'elm_taiyuan_default/elm__date=2024-12-02_12-30-26.epoch=200.lr=0.001.layer=2.head=16.hidden=256.maxlen=128.pth'
     if args.city == 'sanya':
-        if args.fus == 'cat':
-            save_path = 'elm_sanya_default/elm__date=2024-12-02_07-25-53.epoch=200.lr=0.001.layer=2.head=16.hidden=256.maxlen=128.pth'
-        elif args.fus == 'plus':
-            save_path = 'elm_sanya_default/elm__date=2024-12-01_14-01-42.epoch=200.lr=0.001.layer=2.head=16.hidden=256.maxlen=128.pth'
-        else:
-            save_path = 'elm_sanya_default/elm__date=2024-12-02_08-58-01.epoch=200.lr=0.001.layer=2.head=16.hidden=256.maxlen=128.pth'
+        save_path = 'elm_sanya_default/elm__date=2024-12-02_08-58-01.epoch=200.lr=0.001.layer=2.head=16.hidden=256.maxlen=128.pth'
     if args.city == 'wuhan':
-        if args.fus == 'cat':
-            save_path = 'elm_wuhan_default/elm__date=2024-12-02_01-01-36.epoch=200.lr=0.001.layer=2.head=16.hidden=256.maxlen=128.pth'
-        elif args.fus == 'plus':
-            save_path = 'elm_wuhan_default/elm__date=2024-12-01_18-33-20.epoch=200.lr=0.001.layer=2.head=16.hidden=256.maxlen=128.pth'
-        else:
-            save_path = 'elm_wuhan_default/elm__date=2024-12-02_04-28-49.epoch=200.lr=0.001.layer=2.head=16.hidden=256.maxlen=128.pth'
+        save_path = 'elm_wuhan_default/elm__date=2024-12-02_04-28-49.epoch=200.lr=0.001.layer=2.head=16.hidden=256.maxlen=128.pth'
 
 
     # 加载最佳模型权重
