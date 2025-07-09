@@ -99,9 +99,9 @@ class WarpSampler(object):
 # train/val/test data generation
 def data_partition(args):
     
-    df = pickle.load(open('/data/ZhaoShuyuan/Zhaoshuyuan/ELEME/Our_model_final/STKD/datasets/' + args.city + '/' + args.city + '_student_data.pkl', 'rb'))
+    df = pickle.load(open('./datasets/' + args.city + '/' + args.city + '_student_data.pkl', 'rb'))
     # Dict
-    entity_dict = pickle.load(open('/data/ZhaoShuyuan/Zhaoshuyuan/ELEME/Our_model_final/STKD/datasets/' + args.city + '/' + args.city + '_dict.pkl', 'rb'))
+    entity_dict = pickle.load(open('./datasets/' + args.city + '/' + args.city + '_dict.pkl', 'rb'))
 
     u = df['user']
     user_train = df['user_train']
@@ -205,30 +205,6 @@ def evaluate(model, gcn_model, dataset, args, batch_size=128):
                 torch.LongTensor(dis_batch).to(args.device), 
                 np.array(item_idx_batch)
             )
-        else:
-            final_feat, item_embs = model.predict(
-                torch.LongTensor(user_batch).to(args.device), 
-                torch.LongTensor(seq_batch).to(args.device), 
-                torch.LongTensor(geo_batch).to(args.device), 
-                torch.LongTensor(dis_batch).to(args.device), 
-                np.array(item_idx_batch)
-            )
-            final_feat_gnn = gcn_model.predict(
-                torch.LongTensor(user_batch).to(args.device), 
-                torch.LongTensor(seq_batch).to(args.device), 
-                np.array(item_idx_batch)
-            )
-
-            if args.fus == 'add':
-                final_feat = final_feat_gnn + final_feat
-            elif args.fus == 'cat':
-                final_feat = torch.cat((final_feat, final_feat_gnn), dim = -1)
-                final_feat = model.fus_linear(final_feat)
-            elif args.fus == 'plus':
-                final_feat = final_feat * final_feat_gnn
-
-            predictions = -(item_embs.matmul(final_feat.unsqueeze(-1)).squeeze(-1))
-            # predictions = -torch.bmm(item_embs, final_feat.unsqueeze(-1)).squeeze(-1)
         
         for i in range(len(user_batch)):
             u = user_batch[i]
@@ -283,9 +259,6 @@ def evaluate_valid(model, gcn_model, linear_layer, dataset, args, batch_size=128
     data_idx = list(range(len(train)))
     
     for batch_start in tqdm(range(0, len(data_idx), batch_size)):
-        
-        # if batch_start/batch_size == 150:
-        #     print("150")
 
         batch_end = min(batch_start + batch_size, len(data_idx))
         batch_users = data_idx[batch_start:batch_end]
@@ -344,35 +317,7 @@ def evaluate_valid(model, gcn_model, linear_layer, dataset, args, batch_size=128
                 torch.LongTensor(dis_batch).to(args.device), 
                 np.array(item_idx_batch)
             )
-        else:
-            final_feat, item_embs = model.predict(
-                torch.LongTensor(user_batch).to(args.device), 
-                torch.LongTensor(seq_batch).to(args.device), 
-                torch.LongTensor(geo_batch).to(args.device), 
-                torch.LongTensor(dis_batch).to(args.device), 
-                np.array(item_idx_batch)
-            )
-            final_feat_gnn = gcn_model.predict(
-                torch.LongTensor(user_batch).to(args.device), 
-                torch.LongTensor(seq_batch).to(args.device), 
-                np.array(item_idx_batch)
-            )
             
-            final_feat_gnn = linear_layer(final_feat_gnn)
-            
-            if args.fus == 'add':
-                final_feat = final_feat_gnn + final_feat
-            elif args.fus == 'cat':
-                final_feat = torch.cat((final_feat, final_feat_gnn), dim = -1)
-                final_feat = model.fus_linear(final_feat)
-            elif args.fus == 'plus':
-                final_feat = final_feat * final_feat_gnn
-
-            predictions = -(item_embs.matmul(final_feat.unsqueeze(-1)).squeeze(-1))
-            # print(predictions.shape)
-            # predictions = -torch.bmm(item_embs, final_feat.unsqueeze(-1)).squeeze(-1)
-
-        
         for i in range(len(user_batch)):
             
             rank = predictions[i].argsort().argsort()[0].item()
