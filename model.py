@@ -32,26 +32,18 @@ class SASRec(torch.nn.Module):
 
         self.user_num = user_num
         self.item_num = item_num
-        # self.shop_num = shop_num
         self.geo_num = geo_num
         self.dis_num = disnum
-        # self.type_num = type_num
-        # self.t_dif_num = t_dif_num
         self.dev = args.device
 
         # TODO: loss += args.l2_emb for regularizing embedding vectors during training
         # https://stackoverflow.com/questions/42704283/adding-l1-l2-regularization-in-pytorch
         self.pos_emb = torch.nn.Embedding(args.maxlen, args.hidden_units) # TO IMPROVE
         self.item_emb = torch.nn.Embedding(self.item_num+1, args.hidden_units, padding_idx=0)
-        # self.shop_emb = torch.nn.Embedding(self.shop_num+1, args.hidden_units, padding_idx=0)
         self.geo_emb = torch.nn.Embedding(self.geo_num+1, args.hidden_units, padding_idx=0)
         self.dis_emb = torch.nn.Embedding(self.dis_num+1, args.hidden_units, padding_idx=0)
-        # self.type_emb = torch.nn.Embedding(self.type_num+1, args.hidden_units, padding_idx=0)
-        # self.t_dif_emb = torch.nn.Embedding(self.t_dif_num+1, args.hidden_units, padding_idx=0)
 
-        # self.weight_t = nn.Parameter(torch.randn(args.hidden_units, args.hidden_units))
         self.weight_s = nn.Parameter(torch.randn(args.hidden_units, args.hidden_units))
-        # self.weight_st = nn.Parameter(torch.randn(args.hidden_units, args.hidden_units))
 
         self.emb_dropout = torch.nn.Dropout(p=args.dropout_rate)
 
@@ -77,11 +69,8 @@ class SASRec(torch.nn.Module):
             new_fwd_layer = PointWiseFeedForward(args.hidden_units, args.dropout_rate)
             self.forward_layers.append(new_fwd_layer)
 
-            # self.pos_sigmoid = torch.nn.Sigmoid()
-            # self.neg_sigmoid = torch.nn.Sigmoid()
         if args.fus == 'cat':
             self.fus_linear = torch.nn.Linear(args.hidden_units * 2, args.hidden_units) 
-
 
     def get_embedding_parameters(self):
         return [self.item_emb.weight, self.geo_emb.weight, self.dis_emb.weight, self.type_emb.weight, self.t_dif_emb.weight]
@@ -155,8 +144,6 @@ class SASRec(torch.nn.Module):
         if self.args.fus == 'kd' or self.args.fus == 'None':
             pos_logits = (log_feats * pos_embs).sum(dim=-1)
             neg_logits = (log_feats * neg_embs).sum(dim=-1)
-            # pos_pred = self.pos_sigmoid(pos_logits)
-            # neg_pred = self.neg_sigmoid(neg_logits)
             return pos_logits, neg_logits # pos_pred, neg_pred
         else:
             return log_feats, pos_embs, neg_embs
@@ -171,8 +158,6 @@ class SASRec(torch.nn.Module):
             # 加上空间信息
         
             logits = item_embs.matmul(final_feat.unsqueeze(-1)).squeeze(-1)
-
-            # preds = self.pos_sigmoid(logits) # rank same item list for different users
 
             return logits # preds # (U, I)
         else:
