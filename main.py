@@ -10,7 +10,7 @@ from model import SASRec
 from utils import *
 from tqdm import tqdm
 from EarlyStopping import EarlyStopping
-from model_gnn import GCL4SR
+from model_gnn import Graph_model
 
 def set_seed(seed=42):
     random.seed(seed)  # Python内置随机数生成器的种子
@@ -41,14 +41,14 @@ parser.add_argument('--maxlen', default=128, type=int)
 parser.add_argument('--hidden_units', default=256, type=int)    # 32, 64, 128, 256
 parser.add_argument('--num_blocks', default=2, type=int)    # 2, 4, 6
 parser.add_argument('--num_epochs', default=200, type=int)
-parser.add_argument('--num_heads', default=32, type=int)    # 1, 2, 4
+parser.add_argument('--num_heads', default=2, type=int)    # 1, 2, 4
 parser.add_argument('--dropout_rate', default=0.5, type=float)
 parser.add_argument('--l2_emb', default=0.01, type=float)
 parser.add_argument('--device', default='cuda:5', type=str)
 
 # Spatial-Temporal Knowledge Distllition
-parser.add_argument('--geo_hash', default=False, choices=[True, False], type=bool) 
-parser.add_argument('--distances', default=False, choices=[True, False], type=bool) 
+parser.add_argument('--geo_hash', default=True, choices=[True, False], type=bool) 
+parser.add_argument('--distances', default=True, choices=[True, False], type=bool) 
 parser.add_argument('--sptia', default=True, choices=[True, False], type=bool) 
 parser.add_argument('--kd', default='all',choices=['pos', 'all', None], type=str) 
 parser.add_argument('--loss_type', default='bce', choices=['bce', 'cross'], type=str)
@@ -57,8 +57,8 @@ parser.add_argument('--lamada', default=0.5, type=float)
 
 
 # Teacher Model GNNs
-parser.add_argument("--pre_train_path",default='/data/ZhaoShuyuan/Zhaoshuyuan/ELEME/Our_model_final/STKD/pre_train/', type=str)
-parser.add_argument("--gnn_dataset", default='/data/ZhaoShuyuan/Zhaoshuyuan/ELEME/Our_model_final/STKD/datasets/', type=str)
+parser.add_argument("--pre_train_path",default='./pre_train/', type=str)
+parser.add_argument("--gnn_dataset", default='./datasets/', type=str)
 parser.add_argument('--gnn_hidden_units', default=256, type=int)    # 32, 64, 128, 256
 parser.add_argument("--use_renorm", type=bool, default=True, help="use re-normalize when build witg")
 parser.add_argument("--use_scale", type=bool, default=False, help="use scale when build witg")
@@ -70,7 +70,6 @@ parser.add_argument("--num_attention_heads", default=2, type=int, help="number o
 parser.add_argument("--hidden_act", default="gelu", type=str, help="activation function")
 
 # Optimizer
-# parser.add_argument("--lr", type=float, default=0.001, help="learning rate of adam")
 parser.add_argument("--lr_dc", type=float, default=0.7, help='learning rate decay.')
 parser.add_argument("--lr_dc_step", type=int, default=5,
                         help='the number of steps after which the learning rate decay.')
@@ -79,17 +78,12 @@ parser.add_argument("--adam_beta1", type=float, default=0.9, help="adam first be
 parser.add_argument("--adam_beta2", type=float, default=0.999, help="adam second beta value")
 
 # Test
-# parser.add_argument('--seed', default=3407, type=int)
 parser.add_argument('--seed', default=2024, type=int)
-# parser.add_argument('--seed', default=42, type=str) 
-# parser.add_argument('--seed', default=114514, type=str) 
-# parser.add_argument('--seed', default=24, type=str) 
 
 parser.add_argument('--fus', default='kd', choices=['kd', 'add', 'cat', 'plus', 'None'], type=str) 
 parser.add_argument('--inference_only', default=True, type=str)
 parser.add_argument('--test', default=False, type=str) 
 parser.add_argument('--log', default='log_8.txt', type=str) 
-
 
 args = parser.parse_args()
 
@@ -117,33 +111,16 @@ if __name__ == '__main__':
     # Process GCN
     if args.kd != None:
         global_graph = torch.load(args.gnn_dataset + '/' + args.city + '_witg.pt')
-        gcn_model = GCL4SR(args=args, global_graph=global_graph)
+        gcn_model = Graph_model(args=args, global_graph=global_graph)
         print('Load GCN Model')
-        args.pre_train_model_path = args.pre_train_path + '/GCL4SR-' + args.city
-        # print(args.pre_train_model_path)
-        # args.pre_train_model_path = find_first_file_with_prefix(args.pre_train_path + '/' + args.city, args.pre_train_model_path)
+        # args.pre_train_model_path = args.pre_train_path + '/Graph_model-' + args.city
         args.pre_train_model_path = args.pre_train_model_path + ".pt"
-        # args.pre_train_model_path = '/data/ZhaoShuyuan/Zhaoshuyuan/ELEME/Our_model_final/STKD/pre_train/wuhan/GCL4SR-wuhan-[5, 5]_21-01-00.pt'
-        # args.pre_train_model_path = '/data/ZhaoShuyuan/Zhaoshuyuan/ELEME/Our_model_final/STKD/pre_train/wuhan/GCL4SR-wuhan-[5, 5]_21-00-12.pt'
-        
-        # args.pre_train_model_path = '/data/ZhaoShuyuan/Zhaoshuyuan/ELEME/Our_model_final/STKD/pre_train/GCL4SR-sanya-[20, 20]_21-01-07.pt'
-        # args.pre_train_model_path = '/data/ZhaoShuyuan/Zhaoshuyuan/ELEME/Our_model_final/STKD/pre_train/GCL4SR-sanya-[20, 20]_21-00-30.pt'
- 
-        # args.pre_train_model_path = '/data/ZhaoShuyuan/Zhaoshuyuan/ELEME/Our_model_final/STKD/pre_train/GCL4SR-taiyuan-[10, 10]_21-00-23.pt'
-        # args.pre_train_model_path = '/data/ZhaoShuyuan/Zhaoshuyuan/ELEME/Our_model_final/STKD/pre_train/GCL4SR-taiyuan-[10, 10]_21-01-08.pt'
-
         gcn_model.load_state_dict(torch.load(args.pre_train_model_path, map_location=args.device))
-
-        # expanded_embedding = nn.Embedding(args.item_size+1, args.gnn_hidden_units, padding_idx=0)
-        # with torch.no_grad():
-        #     expanded_embedding.weight[:args.item_size, :] = gcn_model.item_embeddings.weight
-        # gcn_model.item_embeddings = expanded_embedding
         # 冻结教师模型参数
         for param in gcn_model.parameters():
             param.requires_grad = False
         gcn_model.to(args.device)
         print('Load GCN Model:' + str(args.pre_train_model_path))
-
 
     num_batch = len(user_train) // args.batch_size # tail? + ((len(user_train) % args.batch_size) != 0)
     cc = 0.0
@@ -151,13 +128,11 @@ if __name__ == '__main__':
         cc += len(user_train[i])
     print('average sequence length: %.2f' % (cc / len(user_train)))
 
-    # f = open(os.path.join(args.save_path + '_' + args.train_dir, 'log_3.txt'), 'w')
     f = open(os.path.join(args.save_path + '_' + args.train_dir + '_' + args.fus +'+' +args.log), 'w')
 
-    
     # Process Attention
     sampler = WarpSampler(u, user_train, geo_train, dis_train, usernum, itemnum, geonum, disnum, batch_size=args.batch_size, maxlen=args.maxlen, n_workers=1, seed=args.seed)
-    model = SASRec(usernum, itemnum, geonum, disnum, args).to(args.device) # no ReLU activation in original SASRec implementation?
+    model = SASRec(usernum, itemnum, geonum, disnum, args).to(args.device)
     
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('total update params: %.2f' % total_params)
@@ -167,9 +142,6 @@ if __name__ == '__main__':
             torch.nn.init.xavier_normal_(param.data)
         except:
             pass # just ignore those failed init layers
-    
-    # this fails embedding init 'Embedding' object has no attribute 'dim'
-    # model.apply(torch.nn.init.xavier_uniform_)
     
     model.train() # enable model training
     
@@ -185,13 +157,11 @@ if __name__ == '__main__':
             print('pdb enabled for your quick check, pls type exit() if you do not need it')
             import pdb; pdb.set_trace()
             
-    
     if args.inference_only:
         model.eval()
         t_test = evaluate(model, gcn_model, dataset, args)
         print('test (NDCG@10: %.4f, HR@10: %.4f)' % (t_test[0], t_test[1]))
     
-    # https://github.com/NVIDIA/pix2pixHD/issues/9 how could an old bug appear again...
     bce_criterion = torch.nn.BCEWithLogitsLoss() # torch.nn.BCELoss()
     kd_criterion = torch.nn.KLDivLoss(log_target=False, reduction='batchmean')
     cross_criterion = nn.CrossEntropyLoss()
@@ -204,10 +174,8 @@ if __name__ == '__main__':
     temp = 7    # 1， 3， 5， 7， 9
     early_stopping = EarlyStopping(patience=10, min_delta=0.001)  # 根据需要调整 patience 和 min_delta
 
-
     for epoch in range(epoch_start_idx, args.num_epochs + 1):
         if args.inference_only: break # just to decrease identition
-        # for step in range(num_batch): # tqdm(range(num_batch), total=num_batch, ncols=70, leave=False, unit='b'):
         for step in tqdm(range(num_batch), total=num_batch, ncols=70, leave=False, unit='b'):
 
             adam_optimizer.zero_grad()
@@ -239,8 +207,6 @@ if __name__ == '__main__':
                         with torch.no_grad():   
                             teacher_pos_logits, teacher_neg_logits = gcn_model(u, seq, pos, neg, args) 
                         soft_loss = kd_criterion(F.log_softmax(pos_logits/temp, dim=-1), F.softmax(teacher_pos_logits/temp, dim=1)) + kd_criterion(F.log_softmax(neg_logits/temp, dim=-1), F.softmax(teacher_neg_logits/temp, dim=1))
-                        # soft_loss = kd_criterion(F.log_softmax(teacher_pos_logits/temp, dim=-1), F.softmax(pos_logits/temp, dim=1)) + kd_criterion(F.log_softmax(teacher_neg_logits/temp, dim=-1), F.softmax(neg_logits/temp, dim=1))
-                        # soft_loss = kd_criterion(F.log_softmax(pos_logits[indices]/temp, dim=-1), F.softmax(teacher_pos_logits[indices]/temp, dim=-1)) + kd_criterion(F.log_softmax(neg_logits[indices]/temp, dim=-1), F.softmax(teacher_neg_logits[indices]/temp, dim=-1))
                     else:
                         with torch.no_grad():   
                             teacher_logits = gcn_model(u, seq, pos, neg, args)  
@@ -248,64 +214,10 @@ if __name__ == '__main__':
                             teacher_neg_logits = torch.gather(teacher_logits, dim=2, index=neg.unsqueeze(-1)).squeeze(-1)    
                         soft_loss = kd_criterion(F.log_softmax(pos_logits/temp, dim=-1), F.softmax(teacher_pos_logits/temp, dim=-1)) + kd_criterion(F.log_softmax(neg_logits/temp, dim=-1), F.softmax(teacher_neg_logits/temp, dim=-1))
                 
-                if args.kd == 'pos':
-                    if args.loss_type == 'bce':
-                        with torch.no_grad():   
-                            teacher_pos_logits, teacher_neg_logits = gcn_model(u, seq, pos, neg, args) 
-                        soft_loss = kd_criterion(F.log_softmax(pos_logits/temp, dim=-1), F.softmax(teacher_pos_logits/temp, dim=-1))
-                    else:
-                        with torch.no_grad():   
-                            teacher_logits = gcn_model(u, seq, pos, neg, args)  
-                            teacher_pos_logits = torch.gather(teacher_logits, dim=2, index=pos.unsqueeze(-1)).squeeze(-1) 
-                        soft_loss = kd_criterion(F.log_softmax(pos_logits/temp, dim=-1), F.softmax(teacher_pos_logits/temp, dim=-1))
-
                 if args.kd != None:
                     loss = lamada * soft_loss + (1 - lamada) * rec_loss
-                    # loss = soft_loss + rec_loss
                 else:
                     loss = rec_loss
-
-            elif args.fus == 'add':
-                # Student Model
-                log_feats, pos_embs, neg_embs = model(u, seq, pos, neg, geo, geo_pos, dis, dis_pos)
-                # Teacher Model
-                with torch.no_grad():   
-                    seq_out = gcn_model(u, seq, pos, neg, args) 
-                log_feats = log_feats + seq_out
-                
-                pos_logits = (log_feats * pos_embs).sum(dim=-1)
-                neg_logits = (log_feats * neg_embs).sum(dim=-1)
-                pos_labels, neg_labels = torch.ones(pos_logits.shape, device=args.device), torch.zeros(neg_logits.shape, device=args.device)
-                indices = np.where(pos_ind != 0)
-                loss = bce_criterion(pos_logits[indices], pos_labels[indices])
-                loss += bce_criterion(neg_logits[indices], neg_labels[indices])
-
-            elif args.fus == 'cat':
-                log_feats, pos_embs, neg_embs = model(u, seq, pos, neg, geo, geo_pos, dis, dis_pos)
-                with torch.no_grad():   
-                    seq_out = gcn_model(u, seq, pos, neg, args) 
-                log_feats = torch.cat((log_feats, seq_out), dim = -1)
-                log_feats = model.fus_linear(log_feats)
-                
-                pos_logits = (log_feats * pos_embs).sum(dim=-1)
-                neg_logits = (log_feats * neg_embs).sum(dim=-1)
-                pos_labels, neg_labels = torch.ones(pos_logits.shape, device=args.device), torch.zeros(neg_logits.shape, device=args.device)
-                indices = np.where(pos_ind != 0)
-                loss = bce_criterion(pos_logits[indices], pos_labels[indices])
-                loss += bce_criterion(neg_logits[indices], neg_labels[indices])
-
-            elif args.fus == 'plus':
-                log_feats, pos_embs, neg_embs = model(u, seq, pos, neg, geo, geo_pos, dis, dis_pos)
-                with torch.no_grad():   
-                    seq_out = gcn_model(u, seq, pos, neg, args) 
-                out = log_feats * seq_out
-                
-                pos_logits = (out * pos_embs).sum(dim=-1)
-                neg_logits = (out * neg_embs).sum(dim=-1)
-                pos_labels, neg_labels = torch.ones(pos_logits.shape, device=args.device), torch.zeros(neg_logits.shape, device=args.device)
-                indices = np.where(pos_ind != 0)
-                loss = bce_criterion(pos_logits[indices], pos_labels[indices])
-                loss += bce_criterion(neg_logits[indices], neg_labels[indices])
 
             loss.backward()
             adam_optimizer.step()
