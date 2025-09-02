@@ -194,38 +194,14 @@ def evaluate(model, gcn_model, dataset, args, batch_size=128):
         user_batch = np.array(user_batch)
         item_idx_batch = np.array(item_idx_batch)
 
-        if args.fus == 'kd' or args.fus =='None':
-            predictions = -model.predict(
-                torch.LongTensor(user_batch).to(args.device), 
-                torch.LongTensor(seq_batch).to(args.device), 
-                torch.LongTensor(geo_batch).to(args.device), 
-                torch.LongTensor(dis_batch).to(args.device), 
-                np.array(item_idx_batch)
-            )
-        else:
-            final_feat, item_embs = model.predict(
-                torch.LongTensor(user_batch).to(args.device), 
-                torch.LongTensor(seq_batch).to(args.device), 
-                torch.LongTensor(geo_batch).to(args.device), 
-                torch.LongTensor(dis_batch).to(args.device), 
-                np.array(item_idx_batch)
-            )
-            final_feat_gnn = gcn_model.predict(
-                torch.LongTensor(user_batch).to(args.device), 
-                torch.LongTensor(seq_batch).to(args.device), 
-                np.array(item_idx_batch)
-            )
+        predictions = -model.predict(
+            torch.LongTensor(user_batch).to(args.device), 
+            torch.LongTensor(seq_batch).to(args.device), 
+            torch.LongTensor(geo_batch).to(args.device), 
+            torch.LongTensor(dis_batch).to(args.device), 
+            np.array(item_idx_batch)
+        )
 
-            if args.fus == 'add':
-                final_feat = final_feat_gnn + final_feat
-            elif args.fus == 'cat':
-                final_feat = torch.cat((final_feat, final_feat_gnn), dim = -1)
-                final_feat = model.fus_linear(final_feat)
-            elif args.fus == 'plus':
-                final_feat = final_feat * final_feat_gnn
-
-            predictions = -(item_embs.matmul(final_feat.unsqueeze(-1)).squeeze(-1))
-            # predictions = -torch.bmm(item_embs, final_feat.unsqueeze(-1)).squeeze(-1)
         
         for i in range(len(user_batch)):
             u = user_batch[i]
@@ -262,7 +238,7 @@ def evaluate(model, gcn_model, dataset, args, batch_size=128):
 
     return [NDCG1, NDCG5, NDCG10, NDCG20, NDCG50], [HT1, HT5, HT10, HT20, HT50]
 
-def evaluate_valid(model, gcn_model, linear_layer, dataset, args, batch_size=128):
+def evaluate_valid(model, gcn_model, dataset, args, batch_size=128):
     [user, train, valid, test, geo_train, geo_val, geo_test, dis_train, dis_val, dis_test, usernum, itemnum, geonum, disnum] = copy.deepcopy(dataset)
 
     NDCG1 = 0.0
@@ -333,42 +309,13 @@ def evaluate_valid(model, gcn_model, linear_layer, dataset, args, batch_size=128
         user_batch = np.array(user_batch)
         item_idx_batch = np.array(item_idx_batch)
 
-        if args.fus == 'kd' or args.fus =='None':
-            predictions = -model.predict(
-                torch.LongTensor(user_batch).to(args.device), 
-                torch.LongTensor(seq_batch).to(args.device), 
-                torch.LongTensor(geo_batch).to(args.device), 
-                torch.LongTensor(dis_batch).to(args.device), 
-                np.array(item_idx_batch)
-            )
-        else:
-            final_feat, item_embs = model.predict(
-                torch.LongTensor(user_batch).to(args.device), 
-                torch.LongTensor(seq_batch).to(args.device), 
-                torch.LongTensor(geo_batch).to(args.device), 
-                torch.LongTensor(dis_batch).to(args.device), 
-                np.array(item_idx_batch)
-            )
-            final_feat_gnn = gcn_model.predict(
-                torch.LongTensor(user_batch).to(args.device), 
-                torch.LongTensor(seq_batch).to(args.device), 
-                np.array(item_idx_batch)
-            )
-            
-            final_feat_gnn = linear_layer(final_feat_gnn)
-            
-            if args.fus == 'add':
-                final_feat = final_feat_gnn + final_feat
-            elif args.fus == 'cat':
-                final_feat = torch.cat((final_feat, final_feat_gnn), dim = -1)
-                final_feat = model.fus_linear(final_feat)
-            elif args.fus == 'plus':
-                final_feat = final_feat * final_feat_gnn
-
-            predictions = -(item_embs.matmul(final_feat.unsqueeze(-1)).squeeze(-1))
-            # print(predictions.shape)
-            # predictions = -torch.bmm(item_embs, final_feat.unsqueeze(-1)).squeeze(-1)
-
+        predictions = -model.predict(
+            torch.LongTensor(user_batch).to(args.device), 
+            torch.LongTensor(seq_batch).to(args.device), 
+            torch.LongTensor(geo_batch).to(args.device), 
+            torch.LongTensor(dis_batch).to(args.device), 
+            np.array(item_idx_batch)
+        )
         
         for i in range(len(user_batch)):
             
