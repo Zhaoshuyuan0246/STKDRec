@@ -1,274 +1,281 @@
 import os
-import time
-import torch
-import argparse
 import sys
-os.chdir(sys.path[0])
-import torch.nn as nn
-import torch.nn.functional as F
-from model import SASRec
-from utils import *
+import time
+import random
+import argparse
+from datetime import datetime
 from tqdm import tqdm
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+
+# Import local modules
+from model import STTransformer
+from model_gnn import STKGEncoder
+from utils import data_partition, WarpSampler, evaluate, evaluate_valid
 from EarlyStopping import EarlyStopping
-from model_gnn import Graph_model
 
-def set_seed(seed=42):
-    random.seed(seed)  # Python内置随机数生成器的种子
-    np.random.seed(seed)  # NumPy随机数生成器的种子
-    torch.manual_seed(seed)  # PyTorch的CPU随机数生成器的种子
-    torch.cuda.manual_seed(seed)  # 如果使用GPU，则设置CUDA随机数生成器的种子
-    torch.cuda.manual_seed_all(seed)  # 如果使用多个GPU，则为所有GPU设置随机数生成器的种子
-    torch.backends.cudnn.deterministic = True  # 确保卷积算法的确定性
-    torch.backends.cudnn.benchmark = False  # 禁用自动优化，确保结果可复现
+# --- Helper Functions ---
 
-def find_first_file_with_prefix(directory, prefixes):
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if any(file.startswith(prefix) and file.endswith('.pt') for prefix in prefixes):
-                return os.path.join(root, file)
+def set_seed(seed):
+    """Set random seeds to ensure reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
-parser = argparse.ArgumentParser()
-# Dataset
-parser.add_argument('--city', default='taiyuan', type=str) 
-parser.add_argument('--dataset', default='elm_', type=str) # elm_sanya, elm_small
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-# Student Model
-parser.add_argument('--state_dict_path', default=None, type=str)
-parser.add_argument('--train_dir', default='default', type=str)
-parser.add_argument('--batch_size', default=50, type=int)
-parser.add_argument('--lr', default=0.001, type=float)
-parser.add_argument('--maxlen', default=128, type=int)
-parser.add_argument('--hidden_units', default=256, type=int)    # 32, 64, 128, 256
-parser.add_argument('--num_blocks', default=2, type=int)    # 2, 4, 6
-parser.add_argument('--num_epochs', default=200, type=int)
-parser.add_argument('--num_heads', default=2, type=int)    # 1, 2, 4
-parser.add_argument('--dropout_rate', default=0.5, type=float)
-parser.add_argument('--l2_emb', default=0.01, type=float)
-parser.add_argument('--device', default='cuda:5', type=str)
+    # --- Data & Path Settings ---
+    g_data = parser.add_argument_group('Data & Path Settings')
+    g_data.add_argument('--city', default='wuhan', type=str, help='The city of the dataset')
+    g_data.add_argument('--dataset_dir', default='./data/', type=str, help='Root directory of the dataset')
+    g_data.add_argument('--checkpoint_dir', default='./checkpoint/model/', type=str, help='Directory to save model checkpoints')
+    g_data.add_argument('--pretrain_dir', default='./checkpoint/pre_train_model', type=str, help='Directory of the pre-trained teacher model')
+    g_data.add_argument('--train_dir', default='default', type=str, help='Specific subdirectory name for this training run')
+    g_data.add_argument('--log_file', default='log.txt', type=str, help='Log file name')
 
-# Spatial-Temporal Knowledge Distllition
-parser.add_argument('--geo_hash', default=True, choices=[True, False], type=bool) 
-parser.add_argument('--distances', default=True, choices=[True, False], type=bool) 
-parser.add_argument('--sptia', default=True, choices=[True, False], type=bool) 
-parser.add_argument('--kd', default='all',choices=['pos', 'all', None], type=str) 
-parser.add_argument('--loss_type', default='bce', choices=['bce', 'cross'], type=str)
-parser.add_argument('--only_teacher', default=False, type=str)
-parser.add_argument('--lamada', default=0.5, type=float)
+    # --- Student Model (STTransformer) ---
+    g_student = parser.add_argument_group('Student Model (STTransformer)')
+    g_student.add_argument('--state_dict_path', default=None, type=str, help='Path to student model weights file (for resuming training)')
+    g_student.add_argument('--maxlen', default=128, type=int, help='Maximum sequence length')
+    g_student.add_argument('--hidden_units', default=256, type=int, help='Dimension of hidden units in the model')
+    g_student.add_argument('--num_blocks', default=2, type=int, help='Number of Transformer Blocks')
+    g_student.add_argument('--num_heads', default=16, type=int, help='Number of heads for multi-head attention')
+    g_student.add_argument('--dropout_rate', default=0.5, type=float, help='Dropout rate')
 
+    # --- Teacher Model (GNN) ---
+    g_teacher = parser.add_argument_group('Teacher Model (STKGEncoder)')
+    g_teacher.add_argument('--gnn_hidden_units', default=256, type=int, help='Dimension of hidden units in GNN')
+    g_teacher.add_argument('--sample_size', default=[5, 5], type=int, nargs='+', help='Number of neighbors to sample for GNN')
+    g_teacher.add_argument("--sample_type", default='sparse', choices=['dense', 'sparse'], type=str)
 
-# Teacher Model GNNs
-parser.add_argument("--pre_train_path",default='./pre_train/', type=str)
-parser.add_argument("--gnn_dataset", default='./datasets/', type=str)
-parser.add_argument('--gnn_hidden_units', default=256, type=int)    # 32, 64, 128, 256
-parser.add_argument("--use_renorm", type=bool, default=True, help="use re-normalize when build witg")
-parser.add_argument("--use_scale", type=bool, default=False, help="use scale when build witg")
-parser.add_argument("--fast_run", type=bool, default=True, help="can reduce training time and memory")
-parser.add_argument("--sample_size", default=[10, 10], type=int, nargs='+', help='gnn sample')
-parser.add_argument("--sample_type", default='sparse', choices=['dense', 'sparse'], type=str)
-# Teacher Model Transformer
-parser.add_argument("--num_attention_heads", default=2, type=int, help="number of heads")
-parser.add_argument("--hidden_act", default="gelu", type=str, help="activation function")
+    # --- Knowledge Distillation ---
+    g_kd = parser.add_argument_group('Knowledge Distillation Settings')
+    g_kd.add_argument('--lamada', default=0.01, type=float, help='Balance factor between distillation loss and recommendation loss')
+    g_kd.add_argument('--temperature', default=7.0, type=float, help='Temperature coefficient for knowledge distillation')
+    g_kd.add_argument('--geo_hash', default=False, choices=[True, False], type=bool) 
+    g_kd.add_argument('--distances', default=False, choices=[True, False], type=bool) 
+    g_kd.add_argument('--sptia', default=True, choices=[True, False], type=bool) 
 
-# Optimizer
-parser.add_argument("--lr_dc", type=float, default=0.7, help='learning rate decay.')
-parser.add_argument("--lr_dc_step", type=int, default=5,
-                        help='the number of steps after which the learning rate decay.')
-parser.add_argument("--weight_decay", type=float, default=5e-5, help="weight_decay of adam")
-parser.add_argument("--adam_beta1", type=float, default=0.9, help="adam first beta value")
-parser.add_argument("--adam_beta2", type=float, default=0.999, help="adam second beta value")
+    # --- Training & Optimization ---
+    g_train = parser.add_argument_group('Training & Optimization')
+    g_train.add_argument('--num_epochs', default=200, type=int, help='Number of training epochs')
+    g_train.add_argument('--batch_size', default=50, type=int, help='Batch size')
+    g_train.add_argument('--lr', default=0.001, type=float, help='Learning rate')
+    g_train.add_argument('--l2_emb', default=0.01, type=float, help='L2 regularization coefficient for embeddings')
+    g_train.add_argument('--device', default='cuda:0', type=str, help='Training device (e.g., "cpu", "cuda:0")')
+    g_train.add_argument('--seed', default=2024, type=int, help='Random seed')
+    g_train.add_argument('--eval_freq', default=1, type=int, help='Evaluate every N epochs')
+    g_train.add_argument("--lr_dc", type=float, default=0.7, help='learning rate decay.')
+    g_train.add_argument("--lr_dc_step", type=int, default=5,
+                            help='the number of steps after which the learning rate decay.')
+    g_train.add_argument("--weight_decay", type=float, default=5e-5, help="weight_decay of adam")
+    g_train.add_argument("--adam_beta1", type=float, default=0.9, help="adam first beta value")
+    g_train.add_argument("--adam_beta2", type=float, default=0.999, help="adam second beta value")
 
-# Test
-parser.add_argument('--seed', default=2024, type=int)
+    # --- Execution Control ---
+    g_exec = parser.add_argument_group('Execution Control')
+    g_exec.add_argument('--inference_only', action='store_true', help='Only run inference without training')
 
-parser.add_argument('--fus', default='kd', choices=['kd', 'add', 'cat', 'plus', 'None'], type=str) 
-parser.add_argument('--inference_only', default=True, type=str)
-parser.add_argument('--test', default=False, type=str) 
-parser.add_argument('--log', default='log_8.txt', type=str) 
+    args = parser.parse_args()
+    return args
 
-args = parser.parse_args()
+def initialize_weights(model):
+    """Initialize model weights using Xavier Normal initialization."""
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            try:
+                torch.nn.init.xavier_normal_(param.data)
+            except ValueError:
+                # Ignore layers that cannot be initialized (e.g., Embedding)
+                pass
 
-args.save_path = args.dataset + args.city
-args.gnn_dataset = args.gnn_dataset + args.city
-args.pre_train_path = args.pre_train_path
+def log_and_print_metrics(epoch, T, metrics_ndcg, metrics_hr, header, log_file=None):
+    """Format, print, and log evaluation metrics."""
+    metrics_str = (
+        f"epoch:{epoch if isinstance(epoch, int) else 'N/A':>3s}, time: {T:.1f}s, {header} ("
+        f"NDCG@10: {metrics_ndcg[2]:.4f}, HR@10: {metrics_hr[2]:.4f} | "
+        f"NDCG@1: {metrics_ndcg[0]:.4f}, HR@1: {metrics_hr[0]:.4f}; "
+        f"NDCG@5: {metrics_ndcg[1]:.4f}, HR@5: {metrics_hr[1]:.4f}; "
+        f"NDCG@20: {metrics_ndcg[3]:.4f}, HR@20: {metrics_hr[3]:.4f}; "
+        f"NDCG@50: {metrics_ndcg[4]:.4f}, HR@50: {metrics_hr[4]:.4f})"
+    )
+    print(metrics_str)
+    if log_file:
+        log_file.write(f"{metrics_ndcg} {metrics_hr}\n")
+        log_file.flush()
 
-set_seed(args.seed)
+# --- Main Function ---
 
-if not os.path.isdir(args.save_path + '_' + args.train_dir):
-    os.makedirs(args.save_path + '_' + args.train_dir)
-with open(os.path.join(args.save_path + '_' + args.train_dir, 'args.txt'), 'w') as f:
-    f.write('\n'.join([str(k) + ',' + str(v) for k, v in sorted(vars(args).items(), key=lambda x: x[0])]))
-f.close()
+def main(args):
+    # 1. Setup Environment and Paths
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    args.device = device
+    
+    save_dir = os.path.join(args.checkpoint_dir, f"{args.city}_{args.train_dir}")
+    os.makedirs(save_dir, exist_ok=True)
+    
+    with open(os.path.join(save_dir, 'args.txt'), 'w') as f:
+        f.write('\n'.join([f"{k},{v}" for k, v in sorted(vars(args).items())]))
 
-if __name__ == '__main__':
-    # global dataset
+    log_path = os.path.join(save_dir, args.log_file)
+    log_file = open(log_path, 'w')
+
+    # 2. Load Data
+    args.gnn_dataset_path = os.path.join(args.dataset_dir, args.city)
     dataset = data_partition(args)
-
-    [u, user_train, user_valid, user_test, geo_train, geo_val, geo_test, dis_train, dis_val, dis_test, usernum, itemnum, geonum, disnum] = dataset
-
+    [u, user_train, _, _, geo_train, _, _, dis_train, _, _, usernum, itemnum, geonum, disnum] = dataset
     args.item_size = itemnum
     args.user_size = usernum
-    
-    # Process GCN
-    if args.kd != None:
-        global_graph = torch.load(args.gnn_dataset + '/' + args.city + '_witg.pt')
-        gcn_model = Graph_model(args=args, global_graph=global_graph)
-        print('Load GCN Model')
-        # args.pre_train_model_path = args.pre_train_path + '/Graph_model-' + args.city
-        args.pre_train_model_path = args.pre_train_model_path + ".pt"
-        gcn_model.load_state_dict(torch.load(args.pre_train_model_path, map_location=args.device))
-        # 冻结教师模型参数
-        for param in gcn_model.parameters():
-            param.requires_grad = False
-        gcn_model.to(args.device)
-        print('Load GCN Model:' + str(args.pre_train_model_path))
 
-    num_batch = len(user_train) // args.batch_size # tail? + ((len(user_train) % args.batch_size) != 0)
-    cc = 0.0
-    for i in range(len(user_train)):
-        cc += len(user_train[i])
-    print('average sequence length: %.2f' % (cc / len(user_train)))
+    print(f"Dataset for '{args.city}' loaded. Users: {usernum}, Items: {itemnum}")
 
-    f = open(os.path.join(args.save_path + '_' + args.train_dir + '_' + args.fus +'+' +args.log), 'w')
+    # 3. Load Teacher Model (GNN)
+    graph_path = os.path.join(args.gnn_dataset_path, f"{args.city}_witg.pt")
+    global_graph = torch.load(graph_path, map_location=device)
+    teacher_model = STKGEncoder(args=args, global_graph=global_graph)
 
-    # Process Attention
-    sampler = WarpSampler(u, user_train, geo_train, dis_train, usernum, itemnum, geonum, disnum, batch_size=args.batch_size, maxlen=args.maxlen, n_workers=1, seed=args.seed)
-    model = SASRec(usernum, itemnum, geonum, disnum, args).to(args.device)
+    teacher_model_path = os.path.join(args.pretrain_dir, args.city, f"STKGEncoder-{args.city}.pt")
+    teacher_model.load_state_dict(torch.load(teacher_model_path, map_location=device))
     
-    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print('total update params: %.2f' % total_params)
+    # Freeze teacher model parameters
+    for param in teacher_model.parameters():
+        param.requires_grad = False
+    teacher_model.to(device)
+    teacher_model.eval()
+    print(f"Teacher model loaded from: {teacher_model_path}")
 
-    for name, param in model.named_parameters():
-        try:
-            torch.nn.init.xavier_normal_(param.data)
-        except:
-            pass # just ignore those failed init layers
-    
-    model.train() # enable model training
-    
+    # 4. Create Student Model (Transformer)
+    student_model = STTransformer(usernum, itemnum, geonum, disnum, args).to(device)
+    initialize_weights(student_model)
+    total_params = sum(p.numel() for p in student_model.parameters() if p.requires_grad)
+    print(f'Student model created. Total trainable params: {total_params / 1e6:.2f}M')
+
     epoch_start_idx = 1
-    if args.state_dict_path is not None:
+    if args.state_dict_path:
         try:
-            model.load_state_dict(torch.load(args.state_dict_path, map_location=torch.device(args.device)), strict=False)
+            student_model.load_state_dict(torch.load(args.state_dict_path, map_location=device), strict=False)
+            print(f"Student model state loaded from: {args.state_dict_path}")
             tail = args.state_dict_path[args.state_dict_path.find('epoch=') + 6:]
             epoch_start_idx = int(tail[:tail.find('.')]) + 1
-        except: # in case your pytorch version is not 1.6 etc., pls debug by pdb if load weights failed
-            print('failed loading state_dicts, pls check file path: ', end="")
-            print(args.state_dict_path)
-            print('pdb enabled for your quick check, pls type exit() if you do not need it')
-            import pdb; pdb.set_trace()
-            
+        except Exception as e:
+            print(f"Failed to load state_dict: {e}. Training from scratch.")
+
+    # 5. Handle Inference-Only Mode
     if args.inference_only:
-        model.eval()
-        t_test = evaluate(model, gcn_model, dataset, args)
-        print('test (NDCG@10: %.4f, HR@10: %.4f)' % (t_test[0], t_test[1]))
-    
-    bce_criterion = torch.nn.BCEWithLogitsLoss() # torch.nn.BCELoss()
-    kd_criterion = torch.nn.KLDivLoss(log_target=False, reduction='batchmean')
-    cross_criterion = nn.CrossEntropyLoss()
+        print("Running in inference-only mode...")
+        student_model.eval()
+        ndcg_test, hr_test = evaluate(student_model, teacher_model, dataset, args)
+        log_and_print_metrics('N/A', 0, ndcg_test, hr_test, header='Final Test')
+        log_file.close()
+        return
 
-    adam_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.98))
+    # 6. Prepare for Training
+    sampler = WarpSampler(u, user_train, geo_train, dis_train, usernum, itemnum, geonum, disnum, 
+                          batch_size=args.batch_size, maxlen=args.maxlen, n_workers=1, seed=args.seed)
     
-    lamada = args.lamada
-    T = 0.0
+    bce_criterion = torch.nn.BCEWithLogitsLoss()
+    kd_criterion = torch.nn.KLDivLoss(reduction='batchmean')
+    optimizer = torch.optim.Adam(student_model.parameters(), lr=args.lr, betas=(0.9, 0.98))
+    early_stopping = EarlyStopping(patience=10, min_delta=0.001)
+    
+    num_batch = len(user_train) // args.batch_size
+    T_total = 0.0
     t0 = time.time()
-    temp = 7    # 1， 3， 5， 7， 9
-    early_stopping = EarlyStopping(patience=10, min_delta=0.001)  # 根据需要调整 patience 和 min_delta
 
+    # 7. Training Loop
     for epoch in range(epoch_start_idx, args.num_epochs + 1):
-        if args.inference_only: break # just to decrease identition
-        for step in tqdm(range(num_batch), total=num_batch, ncols=70, leave=False, unit='b'):
+        student_model.train()
+        epoch_loss = 0.0
+        
+        for _ in tqdm(range(num_batch), total=num_batch, ncols=80, desc=f"Epoch {epoch}/{args.num_epochs}", leave=False):
+            optimizer.zero_grad()
 
-            adam_optimizer.zero_grad()
-
-            u, seq, pos, neg, geo, geo_pos, dis, dis_pos = sampler.next_batch() # tuples to ndarray
-
-            pos_ind = np.array(pos)
+            # Sample and convert data
+            batch_data = sampler.next_batch()
+            # u, seq, pos, neg, geo, geo_pos, dis, dis_pos
+            tensors = [torch.LongTensor(arr).to(device) for arr in batch_data]
+            u_t, seq_t, pos_t, neg_t, geo_t, geo_pos_t, dis_t, dis_pos_t = tensors
             
-            u = torch.LongTensor(u).to(args.device)
-            seq = torch.LongTensor(seq).to(args.device)
-            pos = torch.LongTensor(pos).to(args.device)
-            neg = torch.LongTensor(neg).to(args.device)
-            geo = torch.LongTensor(geo).to(args.device)
-            geo_pos = torch.LongTensor(geo_pos).to(args.device)
-            dis = torch.LongTensor(dis).to(args.device)
-            dis_pos = torch.LongTensor(dis_pos).to(args.device)
+            # Forward pass for the student model
+            pos_logits, neg_logits = student_model(u_t, seq_t, pos_t, neg_t, geo_t, geo_pos_t, dis_t, dis_pos_t)
+            
+            # Calculate recommendation loss
+            pos_labels = torch.ones_like(pos_logits)
+            neg_labels = torch.zeros_like(neg_logits)
+            indices = torch.where(pos_t != 0)
+            
+            rec_loss = bce_criterion(pos_logits[indices], pos_labels[indices]) + \
+                       bce_criterion(neg_logits[indices], neg_labels[indices])
 
-            if args.fus == 'kd' or args.fus == 'None':
-                # student Model
-                pos_logits, neg_logits = model(u, seq, pos, neg, geo, geo_pos, dis, dis_pos)
-                pos_labels, neg_labels = torch.ones(pos_logits.shape, device=args.device), torch.zeros(neg_logits.shape, device=args.device)
-                indices = np.where(pos_ind != 0)
-                rec_loss = bce_criterion(pos_logits[indices], pos_labels[indices])
-                rec_loss += bce_criterion(neg_logits[indices], neg_labels[indices])
+            # Forward pass for the teacher model (to get soft labels)
+            with torch.no_grad():
+                teacher_pos_logits, teacher_neg_logits = teacher_model(u_t, seq_t, pos_t, neg_t, args)
+            
+            # Calculate knowledge distillation loss
+            soft_loss = kd_criterion(
+                F.log_softmax(pos_logits / args.temperature, dim=-1),
+                F.softmax(teacher_pos_logits / args.temperature, dim=-1)
+            ) + kd_criterion(
+                F.log_softmax(neg_logits / args.temperature, dim=-1),
+                F.softmax(teacher_neg_logits / args.temperature, dim=-1)
+            )
 
-                # Teacher Model
-                if args.kd == 'all':
-                    if args.loss_type == 'bce':
-                        with torch.no_grad():   
-                            teacher_pos_logits, teacher_neg_logits = gcn_model(u, seq, pos, neg, args) 
-                        soft_loss = kd_criterion(F.log_softmax(pos_logits/temp, dim=-1), F.softmax(teacher_pos_logits/temp, dim=1)) + kd_criterion(F.log_softmax(neg_logits/temp, dim=-1), F.softmax(teacher_neg_logits/temp, dim=1))
-                    else:
-                        with torch.no_grad():   
-                            teacher_logits = gcn_model(u, seq, pos, neg, args)  
-                            teacher_pos_logits = torch.gather(teacher_logits, dim=2, index=pos.unsqueeze(-1)).squeeze(-1)
-                            teacher_neg_logits = torch.gather(teacher_logits, dim=2, index=neg.unsqueeze(-1)).squeeze(-1)    
-                        soft_loss = kd_criterion(F.log_softmax(pos_logits/temp, dim=-1), F.softmax(teacher_pos_logits/temp, dim=-1)) + kd_criterion(F.log_softmax(neg_logits/temp, dim=-1), F.softmax(teacher_neg_logits/temp, dim=-1))
-                
-                if args.kd != None:
-                    loss = lamada * soft_loss + (1 - lamada) * rec_loss
-                else:
-                    loss = rec_loss
-
+            # Combine losses
+            loss = (1 - args.lamada) * rec_loss + args.lamada * soft_loss
             loss.backward()
-            adam_optimizer.step()
+            optimizer.step()
+            epoch_loss += loss.item()
 
-            if args.test == True:
-                break
+        print(f"Epoch {epoch} avg loss: {epoch_loss / num_batch:.4f}")
 
-        print("loss in epoch {} iteration {}: {}".format(epoch, step, loss.item())) # expected 0.4~0.6 after init few epochs
-    
-        if epoch % 1 == 0:
-            model.eval()
+        # 8. Evaluation and Early Stopping
+        if epoch % args.eval_freq == 0:
+            student_model.eval()
             t1 = time.time() - t0
-            T += t1
-            print('Evaluating', end='')
-
-            NDCG_valid, HR_valid = evaluate_valid(model, gcn_model, dataset, args)
+            T_total += t1
             
-            print('epoch:%d, time: %f(s),\n valid (NDCG@1: %.4f, Recall@1: %.4f; NDCG@5: %.4f, Recall@5: %.4f; NDCG@10: %.4f, Recall@10: %.4f; NDCG@20: %.4f, Recall@20: %.4f; NDCG@50: %.4f, Recall@50: %.4f))' % (epoch, T, NDCG_valid[0], HR_valid[0], NDCG_valid[1], HR_valid[1], NDCG_valid[2], HR_valid[2], NDCG_valid[3], HR_valid[3], NDCG_valid[4], HR_valid[4]))
+            ndcg_valid, hr_valid = evaluate_valid(student_model, teacher_model, dataset, args)
+            log_and_print_metrics(epoch, T_total, ndcg_valid, hr_valid, 'Validation', log_file)
             
-            f.write(str(NDCG_valid) + ' ' + str(HR_valid) + '\n')
-            f.flush()
-
-            # 检查早停机制并保存最好的模型状态
-            early_stopping(NDCG_valid[2], model)  # 使用 NDCG@10 作为早停指标
+            # Use NDCG@10 as the early stopping metric
+            early_stopping(ndcg_valid[2], student_model) 
             if early_stopping.early_stop:
-                print("Early stopping")
+                print("Early stopping triggered.")
                 break
-
+            
             t0 = time.time()
-            model.train()
 
-    f.close()
+    # 9. Post-Training Procedures
+    log_file.close()
     sampler.close()
-    print("Done")
+    print("Training finished.")
 
-    # 在训练结束后保存最好的模型
-    folder = args.save_path + '_' + args.train_dir
-    current_date = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    fname = '{}_date={}.epoch={}.lr={}.layer={}.head={}.hidden={}.maxlen={}.pth'
-    fname = fname.format(args.dataset, current_date, args.num_epochs, args.lr, args.num_blocks, args.num_heads, args.hidden_units, args.maxlen)
-    save_path = os.path.join(folder, fname)
-    torch.save(early_stopping.best_model_weights, save_path)
-    print(f"Best model saved to {save_path}")
+    # Save the best model
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    fname = f"city={args.city}_date={current_date}_epoch={early_stopping.best_epoch}.pth"
+    best_model_path = os.path.join(save_dir, fname)
+    torch.save(early_stopping.best_model_weights, best_model_path)
+    print(f"Best model saved to {best_model_path}")
 
-    # 加载最佳模型权重
-    model.load_state_dict(torch.load(save_path, map_location=args.device))
-    print(f"Model loaded from {save_path}")
+    # 10. Final Test with the Best Model
+    print("Loading best model for final testing...")
+    student_model.load_state_dict(torch.load(best_model_path, map_location=device))
+    student_model.eval()
+    
+    ndcg_test, hr_test = evaluate(student_model, teacher_model, dataset, args)
+    log_and_print_metrics(early_stopping.best_epoch, T_total, ndcg_test, hr_test, header='Final Test')
 
-    # 设置模型为评估模式
-    model.eval()
-    print('Final test', end='')
-    NDCG_test, HR_test = evaluate(model, gcn_model, dataset, args)
-    print('test (NDCG@1: %.4f, Recall@1: %.4f; NDCG@5: %.4f, Recall@5: %.4f; NDCG@10: %.4f, Recall@10: %.4f; NDCG@20: %.4f, Recall@20: %.4f; NDCG@50: %.4f, Recall@50: %.4f)'
-            % (NDCG_test[0], HR_test[0], NDCG_test[1], HR_test[1], NDCG_test[2], HR_test[2], NDCG_test[3], HR_test[3], NDCG_test[4], HR_test[4]))
+
+if __name__ == '__main__':
+    args = parse_args()
+    set_seed(args.seed)
+    main(args)
