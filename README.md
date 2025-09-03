@@ -1,4 +1,6 @@
 # STKDRec
+Repo for Spatial-Temporal Knowledge Distillation for Takeaway Recommendation
+
 ## Dataset
 The original dataset is available at https://tianchi.aliyun.com/dataset/131047 .
 
