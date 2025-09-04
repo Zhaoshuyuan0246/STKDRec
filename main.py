@@ -48,7 +48,7 @@ def parse_args():
     g_student.add_argument('--maxlen', default=128, type=int, help='Maximum sequence length')
     g_student.add_argument('--hidden_units', default=256, type=int, help='Dimension of hidden units in the model')
     g_student.add_argument('--num_blocks', default=2, type=int, help='Number of Transformer Blocks')
-    g_student.add_argument('--num_heads', default=16, type=int, help='Number of heads for multi-head attention')
+    g_student.add_argument('--num_heads', default=2, type=int, help='Number of heads for multi-head attention')
     g_student.add_argument('--dropout_rate', default=0.5, type=float, help='Dropout rate')
 
     # --- Teacher Model (GNN) ---
@@ -281,3 +281,4 @@ if __name__ == '__main__':
     args = parse_args()
     set_seed(args.seed)
     main(args)
+
