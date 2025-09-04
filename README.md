@@ -1,9 +1,10 @@
 # Spatial-Temporal Knowledge Distillation for Takeaway Recommendation
 This is the official code release of the following paper:
 
+[Spatial-Temporal Knowledge Distillation for Takeaway Recommendation](https://arxiv.org/abs/2412.16502). AAAI2025.
+
 Shuyuan Zhao, Wei Chen, Boyan Shi, Liyong Zhou, Shuohao Lin, Huaiyu Wan. 
 
-[Spatial-Temporal Knowledge Distillation for Takeaway Recommendation](https://arxiv.org/abs/2412.16502). AAAI2025.
 
 ## Qucik Start
 ```
