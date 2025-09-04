@@ -22,6 +22,12 @@ The processed dataset 'wuhan' is available at https://drive.google.com/drive/fol
 
 For the datasets 'wuhan', go into the dataset folder in the ./data directory.
 
+## Checkpoint
+
+The pre trained model STKG Encoder is available at https://drive.google.com/file/d/11Va5puWLCfL6wwyGpq3mOlBOTZrCEEQS/view?usp=drive_link .
+
+The trained model ST-Transformer is available at https://drive.google.com/file/d/1fH6naODYwxbraIsm5O6flHKCwJxw_8mn/view?usp=drive_link .
+
 ## Cite
 ```
 @inproceedings{zhao2025spatial,
