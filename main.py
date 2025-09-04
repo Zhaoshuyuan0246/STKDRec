@@ -83,7 +83,7 @@ def parse_args():
 
     # --- Execution Control ---
     g_exec = parser.add_argument_group('Execution Control')
-    g_exec.add_argument('--inference_only', action='store_true', help='Only run inference without training')
+    g_exec.add_argument('--inference_only', default=False, action='store_true', help='Only run inference without training')
 
     args = parser.parse_args()
     return args
@@ -101,7 +101,7 @@ def initialize_weights(model):
 def log_and_print_metrics(epoch, T, metrics_ndcg, metrics_hr, header, log_file=None):
     """Format, print, and log evaluation metrics."""
     metrics_str = (
-        f"epoch:{epoch if isinstance(epoch, int) else 'N/A':>3s}, time: {T:.1f}s, {header} ("
+        f"epoch:{(str(epoch) if isinstance(epoch, int) else 'N/A'):>3s}, time: {T:.1f}s, {header} ("
         f"NDCG@10: {metrics_ndcg[2]:.4f}, HR@10: {metrics_hr[2]:.4f} | "
         f"NDCG@1: {metrics_ndcg[0]:.4f}, HR@1: {metrics_hr[0]:.4f}; "
         f"NDCG@5: {metrics_ndcg[1]:.4f}, HR@5: {metrics_hr[1]:.4f}; "
@@ -235,6 +235,7 @@ def main(args):
             optimizer.step()
             epoch_loss += loss.item()
 
+
         print(f"Epoch {epoch} avg loss: {epoch_loss / num_batch:.4f}")
 
         # 8. Evaluation and Early Stopping
@@ -247,12 +248,13 @@ def main(args):
             log_and_print_metrics(epoch, T_total, ndcg_valid, hr_valid, 'Validation', log_file)
             
             # Use NDCG@10 as the early stopping metric
-            early_stopping(ndcg_valid[2], student_model) 
+            early_stopping(ndcg_valid[2], student_model, epoch) 
             if early_stopping.early_stop:
                 print("Early stopping triggered.")
                 break
             
             t0 = time.time()
+
 
     # 9. Post-Training Procedures
     log_file.close()
